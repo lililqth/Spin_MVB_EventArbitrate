@@ -1,0 +1,267 @@
+# define judge(addr, AD)   addr < AD
+
+int numOfEquip = 3;
+
+chan in[3] = [1] of {int};
+chan out[3] = [1] of {int};
+/*17表示出现错误， 16表示正确结束事件仲裁*/
+int Conflict[17] = {1, 3, 5, 7, 9, 11, 13, 17, 17, 17, 17, 17, 17, 17, 17, 0};
+int silent[17] = {16, 2, 15, 4, 2, 6, 15, 17, 17, 17, 17, 17, 17, 17, 17, 16};
+int OK[17] = { 15, 2, 15, 4, 2, 6, 15, 8, 4, 10, 2, 12, 6, 14, 15, 0};
+int table[17] = {36864, 57341, 57340, 57339, 57337, 57338, 57336, 57335, 57331, 57333, 57329, 57334, 57330, 57332, 57328, 36864};
+/*
+F_code = 9：一般事件标志符
+F_code = 13：组事件标志符
+f_code = 4：事件
+*/
+proctype equip1(){
+int i, j;
+int x;
+int addr = 1;
+int addrSub, ADSub;
+bool judge;
+int equipNum = 0;
+bool haveIncident = true;
+int signalJudge;
+int receiveNum = 0;
+int signalAnswer = (4 << 12) + addr; /*事件标识符响应*/
+int messageAnswer = addr; /*事件响应*/
+
+/*等待新的请求*/
+S1: if
+    ::empty(out[equipNum])->  goto S1;
+    ::nempty(out[equipNum])-> out[equipNum] ? receiveNum; goto S2;
+    fi
+/*判断 1. 要不要响应 2. 响应事件标志符 3. 响应事件*/
+S2: signalJudge = 1;
+    int fCode = receiveNum >> 12;
+    int AD = receiveNum & 4095; 
+    /*找到第一个0的位置*/
+    for (i : 0..11){
+        if
+        :: (AD & (1 << (11 - i))) >> (11 - i) ==0 -> goto FZ;
+        :: else -> skip;
+        fi
+    }
+FZ: i++;
+    addrSub = ((addr << i) & 4095) >> i;
+    ADSub = ((AD << i) & 4095) >> i;
+    if
+    :: (addrSub == ADSub) -> judge = true;
+    :: else -> judge = false;
+    fi
+    if
+    :: (haveIncident==true && fCode == 9) -> goto S3; /*响应标志符*/
+    :: (haveIncident==true && fCode == 13 && judge == true) -> goto S3;
+    :: (fCode == 4 && judge == true) -> goto S4; /*响应事件*/
+    :: else -> goto S1;
+    fi
+
+/*发送事件标志符*/
+S3: in[equipNum] ! signalAnswer;
+    goto S1;
+
+/*发送事件*/
+S4: haveIncident = false;
+    in[equipNum] ! messageAnswer;
+    goto S5;
+
+/*生命周期结束*/
+S5: printf("equip%d ended\n", addr); skip;
+
+}
+
+proctype equip2(){
+int i, j;
+int x;
+int addr = 2;
+int addrSub, ADSub;
+bool judge;
+int equipNum = 1;
+bool haveIncident = true;
+int signalJudge;
+int receiveNum = 0;
+int signalAnswer = (4 << 12) + addr; /*事件标识符响应*/
+int messageAnswer = addr; /*事件响应*/
+
+/*等待新的请求*/
+S1: if
+    ::empty(out[equipNum])->  goto S1;
+    ::nempty(out[equipNum])-> out[equipNum] ? receiveNum; goto S2;
+    fi
+/*判断 1. 要不要响应 2. 响应事件标志符 3. 响应事件*/
+S2: signalJudge = 1;
+    int fCode = receiveNum >> 12;
+    int AD = receiveNum & 4095; 
+    /*找到第一个0的位置*/
+    for (i : 0..11){
+        if
+        :: (AD & (1 << (11 - i))) >> (11 - i) ==0 -> goto FZ;
+        :: else -> skip;
+        fi
+    }
+FZ: i++;
+    addrSub = ((addr << i) & 4095) >> i;
+    ADSub = ((AD << i) & 4095) >> i;
+    if
+    :: (addrSub == ADSub) -> judge = true;
+    :: else -> judge = false;
+    fi
+    if
+    :: (haveIncident==true && fCode == 9) -> goto S3; /*响应标志符*/
+    :: (haveIncident==true && fCode == 13 && judge == true) -> goto S3;
+    :: (fCode == 4 && judge == true) -> goto S4; /*响应事件*/
+    :: else -> goto S1;
+    fi
+
+/*发送事件标志符*/
+S3: in[equipNum] ! signalAnswer;
+    goto S1;
+
+/*发送事件*/
+S4: haveIncident = false;
+    in[equipNum] ! messageAnswer;
+    goto S5;
+
+/*生命周期结束*/
+S5: printf("equip%d ended\n", addr); skip;
+}
+
+proctype equip3(){
+int i, j;
+int x;
+int addr = 3;
+int addrSub, ADSub;
+bool judge;
+int equipNum = 2;
+bool haveIncident = true;
+int signalJudge;
+int receiveNum = 0;
+int signalAnswer = (4 << 12) + addr; /*事件标识符响应*/
+int messageAnswer = addr; /*事件响应*/
+
+/*等待新的请求*/
+S1: if
+    ::empty(out[equipNum])->  goto S1;
+    ::nempty(out[equipNum])-> out[equipNum] ? receiveNum; goto S2;
+    fi
+/*判断 1. 要不要响应 2. 响应事件标志符 3. 响应事件*/
+S2: signalJudge = 1;
+    int fCode = receiveNum >> 12;
+    int AD = receiveNum & 4095; 
+    /*找到第一个0的位置*/
+    for (i : 0..11){
+        if
+        :: (AD & (1 << (11 - i))) >> (11 - i) ==0 -> goto FZ;
+        :: else -> skip;
+        fi
+    }
+FZ: i++;
+    addrSub = ((addr << i) & 4095) >> i;
+    ADSub = ((AD << i) & 4095) >> i;
+    if
+    :: (addrSub == ADSub) -> judge = true;
+    :: else -> judge = false;
+    fi
+    if
+    :: (haveIncident==true && fCode == 9) -> goto S3; /*响应标志符*/
+    :: (haveIncident==true && fCode == 13 && judge == true) -> goto S3;
+    :: (fCode == 4 && judge == true) -> goto S4; /*响应事件*/
+    :: else -> goto S1;
+    fi
+
+/*发送事件标志符*/
+S3: in[equipNum] ! signalAnswer;
+    goto S1;
+
+/*发送事件*/
+S4: haveIncident = false;
+    in[equipNum] ! messageAnswer;
+    goto S5;
+
+/*生命周期结束*/
+S5: printf("equip%d ended\n",addr); skip;
+}
+
+
+proctype main(){
+int i, j;
+int T_reply = 100;
+int answerNum;
+/*事件仲裁*/
+int direction; //仲裁结果 1.碰撞 2. 寂静 3. 单一响应
+int currentIndex = 0; //当前位置
+int message = 36864;
+int temp;
+/*向每一个端口发送消息*/
+S1:temp = 0; 
+    /*清空输入和输出信道*/
+    printf("message send %d", currentIndex);
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) ->  in[i] ? temp;
+        :: nempty(out[i]) -> out[i] ? temp;
+        :: (empty(in[i]) && empty(out[i]))-> skip;
+        fi
+    }
+    for (i : 0 .. numOfEquip - 1){
+        out[i] ! message;
+    }
+    goto S2;
+
+/*等待T_reply的时间*/
+S2: for (i : 1 .. T_reply){
+        skip;
+    }
+    goto S3;
+
+/*接受消息，并进行事件仲裁*/
+S3: answerNum = 0;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> answerNum++;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    if
+    ::answerNum > 1 -> ;currentIndex = Conflict[currentIndex]; message = table[currentIndex]; printf("conflict\n"); goto S1;// 冲突
+    ::(answerNum == 0) -> 
+        currentIndex = silent[currentIndex]; 
+        if
+        ::currentIndex == 16 -> goto SF;
+        ::else -> skip;
+        fi
+        message = table[currentIndex]; 
+        printf("silent\n"); 
+        goto S1;//寂静
+    ::answerNum == 1 -> currentIndex = OK[currentIndex]; message = table[currentIndex]; printf("single\n"); goto S4;//单一响应
+    ::else -> printf("error\n");
+    fi
+
+/*单一响应，接受消息*/
+S4: j = -1;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> j=i;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    int answer; 
+    in[j] ? answer;
+    out[j] ! answer;
+    for (i : 1 .. T_reply){
+        skip;
+    }
+    in[j] ? answer;
+    goto S1;
+
+SF: printf("End\n"); skip;/*生命周期结束*/
+}
+
+init{
+    run main();
+    run equip1();
+    run equip2();
+    run equip3();
+   //out[0] ! 40957;
+}
