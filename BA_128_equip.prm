@@ -1,0 +1,598 @@
+# define judge(addr, AD)   addr < AD
+int endedEquip = 0;
+int numOfEquip = 64;
+int totalPriority = 2;
+chan in[numOfEquip] = [1] of {int};
+chan out[numOfEquip] = [1] of {int};
+/*-1表示出现错误，-2表示正确结束事件仲裁*/
+int Conflict[128];
+int silent[128];
+int OK[128];
+int table[128] = {36864, 57340,57341,57336,57338,57337,57339,57328,57332,57330,57334,57329,57333,57331,57335,57312,57320,57316,57324,57314,57322,57318,57326,57313,57321,57317,57325,57315,57323,57319,57327,57280,57296,57288,57304,57284,57300,57292,57308,57282,57298,57290,57306,57286,57302,57294,57310,57281,57297,57289,57305,57285,57301,57293,57309,57283,57299,57291,57307,57287,57303,57295,57311,57216,57248,57232,57264,57224,57256,57240,57272,57220,57252,57236,57268,57228,57260,57244,57276,57218,57250,57234,57266,57226,57258,57242,57274,57222,57254,57238,57270,57230,57262,57246,57278,57217,57249,57233,57265,57225,57257,57241,57273,57221,57253,57237,57269,57229,57261,57245,57277,57219,57251,57235,57267,57227,57259,57243,57275,57223,57255,57239,57271,57231,57263,57247,57279,36864};
+ /*
+F_code = 9：一般事件标志符
+F_code = 13：组事件标志符
+f_code = 4：事件
+*/
+/*
+Input:
+int addr : 设备的地址
+int equipNum : 设备的编号 （对应相应编号的管道）
+int eventPriority : 事件优先级
+*/
+proctype equip(int addr; int equipNum; int eventPriority){
+int Priority;
+Priority = 100; /* 定义当前事件巡回的优先级*/
+int i, j;
+int addrSub, ADSub;
+bool judge;
+bool haveIncident = true;
+int signalJudge;
+int receiveNum = 0;
+int signalAnswer = (4 << 12) + addr; /*事件标识符响应*/
+int messageAnswer = addr; /*事件响应*/
+
+/*等待新的请求*/
+S1: if
+    ::empty(out[equipNum])->  goto S1;
+    ::nempty(out[equipNum])-> out[equipNum] ? receiveNum; goto S2;
+    fi
+/*判断 1. 要不要响应 2. 响应事件标志符 3. 响应事件*/
+S2: signalJudge = 1;
+    int fCode = receiveNum >> 12;
+    int AD = receiveNum & 4095;
+
+    /*获取本次事件巡回的优先级*/
+    if
+    :: (fCode==9 && Priority==100) -> Priority = (receiveNum & 240) >> 4;
+    :: (fCode==9  && Priority!=100) -> Priority = 100;
+    :: else -> skip;
+    fi
+
+   /* 
+    if
+    :: (addr==38) -> printf("fuck!!! %d\n", Priority);
+    :: else -> skip;
+    fi
+*/
+    /*找到第一个0的位置*/
+    for (i : 0..11){
+        if
+        :: (AD & (1 << (11 - i))) >> (11 - i) ==0 -> goto FZ;
+        :: else -> skip;
+        fi
+    }
+
+FZ: 
+    i++;
+    addrSub = ((addr << i) & 4095) >> i;
+    ADSub = ((AD << i) & 4095) >> i;
+    if
+    :: (addrSub == ADSub) -> judge = true;
+    :: else -> judge = false;
+    fi
+    if
+    :: (haveIncident==true && fCode == 9) -> goto S3; /*一般事件请求*/
+    :: (haveIncident==true && fCode == 13 && judge == true) -> goto S3; /*组事件请求*/
+    :: (fCode == 4 && judge == true) -> goto S4; /*响应事件*/
+    :: else -> goto S1;
+    fi
+
+
+/*发送事件标志符*/
+S3: if
+    :: Priority == eventPriority -> in[equipNum] ! signalAnswer;
+    :: else -> skip;
+    fi
+    goto S1;
+
+/*发送事件*/
+S4: haveIncident = false;
+    in[equipNum] ! messageAnswer;
+    goto S5;
+
+/*生命周期结束*/
+S5: printf("equip%d ended\n", addr); endedEquip++; skip;
+}
+
+
+proctype main(){
+int totalSendNum = 0; /*用于记录总共发送了几条消息*/
+int commonEventTable[4] = {36864, 36880, 36896, 36912};/*不同优先级的一般事件*/
+int Priority = 0;
+int i, j;
+int T_reply = 100;
+int answerNum;
+/*事件仲裁*/
+int direction; //仲裁结果 1.碰撞 2. 寂静 3. 单一响应
+int currentIndex = 0; //当前位置
+int message = 36864;
+int temp;
+/*向每一个端口发送消息*/
+S1: 
+    if 
+    :: currentIndex== 127 -> message = commonEventTable[Priority];
+    :: currentIndex == 0 -> message = commonEventTable[Priority];
+    :: else ->skip;
+    fi
+    totalSendNum++;
+    temp = 0;
+    /*清空输入和输出信道*/
+    printf("message send %d, message %d", currentIndex, message);
+
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) ->  in[i] ? temp;
+        :: nempty(out[i]) -> out[i] ? temp;
+        :: (empty(in[i]) && empty(out[i]))-> skip;
+        fi
+    }
+    for (i : 0 .. numOfEquip - 1){
+        out[i] ! message;
+    }
+    goto S2;
+
+/*等待T_reply的时间*/
+S2: for (i : 1 .. T_reply){
+        skip;
+    }
+    goto S3;
+
+/*接受消息，并进行事件仲裁*/
+S3: answerNum = 0;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> 
+            answerNum++;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    if
+    ::answerNum > 1 -> ;currentIndex = Conflict[currentIndex]; message = table[currentIndex]; printf("conflict\n"); goto S1;// 冲突
+    ::(answerNum == 0) ->
+        printf("silent\n");
+        currentIndex = silent[currentIndex];
+        if
+        ::(currentIndex == -2 && Priority == totalPriority - 1) -> goto SF; /*如果已经对所有的优先级进行了遍历*/
+        ::(currentIndex == -2 && Priority < totalPriority - 1 ) -> Priority++; currentIndex = 0; printf("Priority = %d\n", Priority); /*对下一个优先级遍历*/
+        ::else -> message = table[currentIndex];
+        fi
+        goto S1;//寂静
+    ::answerNum == 1 -> currentIndex = OK[currentIndex]; message = table[currentIndex]; printf("single\n"); goto S4;//单一响应
+    ::else -> printf("error\n");
+    fi
+
+/*单一响应，接受消息*/
+S4: j = -1;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> j=i;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    int answer;
+    in[j] ? answer;
+    out[j] ! answer;
+    for (i : 1 .. T_reply){
+        skip;
+    }
+    in[j] ? answer;
+    goto S1;
+
+SF: printf("All Ended\n"); 
+    printf("Total number %d\n", totalSendNum);
+    printf("endedEquip number %d\n",endedEquip);
+    skip;/*生命周期结束*/
+}
+
+init{
+Conflict[0] = 1;
+Conflict[1] = 3;
+Conflict[2] = 5;
+Conflict[3] = 7;
+Conflict[4] = 9;
+Conflict[5] = 11;
+Conflict[6] = 13;
+Conflict[7] = 15;
+Conflict[8] = 17;
+Conflict[9] = 19;
+Conflict[10] = 21;
+Conflict[11] = 23;
+Conflict[12] = 25;
+Conflict[13] = 27;
+Conflict[14] = 29;
+Conflict[15] = 31;
+Conflict[16] = 33;
+Conflict[17] = 35;
+Conflict[18] = 37;
+Conflict[19] = 39;
+Conflict[20] = 41;
+Conflict[21] = 43;
+Conflict[22] = 45;
+Conflict[23] = 47;
+Conflict[24] = 49;
+Conflict[25] = 51;
+Conflict[26] = 53;
+Conflict[27] = 55;
+Conflict[28] = 57;
+Conflict[29] = 59;
+Conflict[30] = 61;
+Conflict[31] = 63;
+Conflict[32] = 65;
+Conflict[33] = 67;
+Conflict[34] = 69;
+Conflict[35] = 71;
+Conflict[36] = 73;
+Conflict[37] = 75;
+Conflict[38] = 77;
+Conflict[39] = 79;
+Conflict[40] = 81;
+Conflict[41] = 83;
+Conflict[42] = 85;
+Conflict[43] = 87;
+Conflict[44] = 89;
+Conflict[45] = 91;
+Conflict[46] = 93;
+Conflict[47] = 95;
+Conflict[48] = 97;
+Conflict[49] = 99;
+Conflict[50] = 101;
+Conflict[51] = 103;
+Conflict[52] = 105;
+Conflict[53] = 107;
+Conflict[54] = 109;
+Conflict[55] = 111;
+Conflict[56] = 113;
+Conflict[57] = 115;
+Conflict[58] = 117;
+Conflict[59] = 119;
+Conflict[60] = 121;
+Conflict[61] = 123;
+Conflict[62] = 125;
+Conflict[63] = -1;
+Conflict[64] = -1;
+Conflict[65] = -1;
+Conflict[66] = -1;
+Conflict[67] = -1;
+Conflict[68] = -1;
+Conflict[69] = -1;
+Conflict[70] = -1;
+Conflict[71] = -1;
+Conflict[72] = -1;
+Conflict[73] = -1;
+Conflict[74] = -1;
+Conflict[75] = -1;
+Conflict[76] = -1;
+Conflict[77] = -1;
+Conflict[78] = -1;
+Conflict[79] = -1;
+Conflict[80] = -1;
+Conflict[81] = -1;
+Conflict[82] = -1;
+Conflict[83] = -1;
+Conflict[84] = -1;
+Conflict[85] = -1;
+Conflict[86] = -1;
+Conflict[87] = -1;
+Conflict[88] = -1;
+Conflict[89] = -1;
+Conflict[90] = -1;
+Conflict[91] = -1;
+Conflict[92] = -1;
+Conflict[93] = -1;
+Conflict[94] = -1;
+Conflict[95] = -1;
+Conflict[96] = -1;
+Conflict[97] = -1;
+Conflict[98] = -1;
+Conflict[99] = -1;
+Conflict[100] = -1;
+Conflict[101] = -1;
+Conflict[102] = -1;
+Conflict[103] = -1;
+Conflict[104] = -1;
+Conflict[105] = -1;
+Conflict[106] = -1;
+Conflict[107] = -1;
+Conflict[108] = -1;
+Conflict[109] = -1;
+Conflict[110] = -1;
+Conflict[111] = -1;
+Conflict[112] = -1;
+Conflict[113] = -1;
+Conflict[114] = -1;
+Conflict[115] = -1;
+Conflict[116] = -1;
+Conflict[117] = -1;
+Conflict[118] = -1;
+Conflict[119] = -1;
+Conflict[120] = -1;
+Conflict[121] = -1;
+Conflict[122] = -1;
+Conflict[123] = -1;
+Conflict[124] = -1;
+Conflict[125] = -1;
+Conflict[126] = -1;
+Conflict[127] = 0;
+        
+
+silent[0] = 127;
+silent[1] = 2;
+silent[2] = 127;
+silent[3] = 4;
+silent[4] = 2;
+silent[5] = 6;
+silent[6] = 127;
+silent[7] = 8;
+silent[8] = 4;
+silent[9] = 10;
+silent[10] = 2;
+silent[11] = 12;
+silent[12] = 6;
+silent[13] = 14;
+silent[14] = 127;
+silent[15] = 16;
+silent[16] = 8;
+silent[17] = 18;
+silent[18] = 4;
+silent[19] = 20;
+silent[20] = 10;
+silent[21] = 22;
+silent[22] = 2;
+silent[23] = 24;
+silent[24] = 12;
+silent[25] = 26;
+silent[26] = 6;
+silent[27] = 28;
+silent[28] = 14;
+silent[29] = 30;
+silent[30] = 127;
+silent[31] = 32;
+silent[32] = 16;
+silent[33] = 34;
+silent[34] = 8;
+silent[35] = 36;
+silent[36] = 18;
+silent[37] = 38;
+silent[38] = 4;
+silent[39] = 40;
+silent[40] = 20;
+silent[41] = 42;
+silent[42] = 10;
+silent[43] = 44;
+silent[44] = 22;
+silent[45] = 46;
+silent[46] = 2;
+silent[47] = 48;
+silent[48] = 24;
+silent[49] = 50;
+silent[50] = 12;
+silent[51] = 52;
+silent[52] = 26;
+silent[53] = 54;
+silent[54] = 6;
+silent[55] = 56;
+silent[56] = 28;
+silent[57] = 58;
+silent[58] = 14;
+silent[59] = 60;
+silent[60] = 30;
+silent[61] = 62;
+silent[62] = 127;
+silent[63] = -1;
+silent[64] = -1;
+silent[65] = -1;
+silent[66] = -1;
+silent[67] = -1;
+silent[68] = -1;
+silent[69] = -1;
+silent[70] = -1;
+silent[71] = -1;
+silent[72] = -1;
+silent[73] = -1;
+silent[74] = -1;
+silent[75] = -1;
+silent[76] = -1;
+silent[77] = -1;
+silent[78] = -1;
+silent[79] = -1;
+silent[80] = -1;
+silent[81] = -1;
+silent[82] = -1;
+silent[83] = -1;
+silent[84] = -1;
+silent[85] = -1;
+silent[86] = -1;
+silent[87] = -1;
+silent[88] = -1;
+silent[89] = -1;
+silent[90] = -1;
+silent[91] = -1;
+silent[92] = -1;
+silent[93] = -1;
+silent[94] = -1;
+silent[95] = -1;
+silent[96] = -1;
+silent[97] = -1;
+silent[98] = -1;
+silent[99] = -1;
+silent[100] = -1;
+silent[101] = -1;
+silent[102] = -1;
+silent[103] = -1;
+silent[104] = -1;
+silent[105] = -1;
+silent[106] = -1;
+silent[107] = -1;
+silent[108] = -1;
+silent[109] = -1;
+silent[110] = -1;
+silent[111] = -1;
+silent[112] = -1;
+silent[113] = -1;
+silent[114] = -1;
+silent[115] = -1;
+silent[116] = -1;
+silent[117] = -1;
+silent[118] = -1;
+silent[119] = -1;
+silent[120] = -1;
+silent[121] = -1;
+silent[122] = -1;
+silent[123] = -1;
+silent[124] = -1;
+silent[125] = -1;
+silent[126] = -1;
+silent[127] = -2
+      
+OK[0] = 127;
+OK[1] = 2;
+OK[2] = 127;
+OK[3] = 4;
+OK[4] = 2;
+OK[5] = 6;
+OK[6] = 127;
+OK[7] = 8;
+OK[8] = 4;
+OK[9] = 10;
+OK[10] = 2;
+OK[11] = 12;
+OK[12] = 6;
+OK[13] = 14;
+OK[14] = 127;
+OK[15] = 16;
+OK[16] = 8;
+OK[17] = 18;
+OK[18] = 4;
+OK[19] = 20;
+OK[20] = 10;
+OK[21] = 22;
+OK[22] = 2;
+OK[23] = 24;
+OK[24] = 12;
+OK[25] = 26;
+OK[26] = 6;
+OK[27] = 28;
+OK[28] = 14;
+OK[29] = 30;
+OK[30] = 127;
+OK[31] = 32;
+OK[32] = 16;
+OK[33] = 34;
+OK[34] = 8;
+OK[35] = 36;
+OK[36] = 18;
+OK[37] = 38;
+OK[38] = 4;
+OK[39] = 40;
+OK[40] = 20;
+OK[41] = 42;
+OK[42] = 10;
+OK[43] = 44;
+OK[44] = 22;
+OK[45] = 46;
+OK[46] = 2;
+OK[47] = 48;
+OK[48] = 24;
+OK[49] = 50;
+OK[50] = 12;
+OK[51] = 52;
+OK[52] = 26;
+OK[53] = 54;
+OK[54] = 6;
+OK[55] = 56;
+OK[56] = 28;
+OK[57] = 58;
+OK[58] = 14;
+OK[59] = 60;
+OK[60] = 30;
+OK[61] = 62;
+OK[62] = 127;
+OK[63] = 64;
+OK[64] = 32;
+OK[65] = 66;
+OK[66] = 16;
+OK[67] = 68;
+OK[68] = 34;
+OK[69] = 70;
+OK[70] = 8;
+OK[71] = 72;
+OK[72] = 36;
+OK[73] = 74;
+OK[74] = 18;
+OK[75] = 76;
+OK[76] = 38;
+OK[77] = 78;
+OK[78] = 4;
+OK[79] = 80;
+OK[80] = 40;
+OK[81] = 82;
+OK[82] = 20;
+OK[83] = 84;
+OK[84] = 42;
+OK[85] = 86;
+OK[86] = 10;
+OK[87] = 88;
+OK[88] = 44;
+OK[89] = 90;
+OK[90] = 22;
+OK[91] = 92;
+OK[92] = 46;
+OK[93] = 94;
+OK[94] = 2;
+OK[95] = 96;
+OK[96] = 48;
+OK[97] = 98;
+OK[98] = 24;
+OK[99] = 100;
+OK[100] = 50;
+OK[101] = 102;
+OK[102] = 12;
+OK[103] = 104;
+OK[104] = 52;
+OK[105] = 106;
+OK[106] = 26;
+OK[107] = 108;
+OK[108] = 54;
+OK[109] = 110;
+OK[110] = 6;
+OK[111] = 112;
+OK[112] = 56;
+OK[113] = 114;
+OK[114] = 28;
+OK[115] = 116;
+OK[116] = 58;
+OK[117] = 118;
+OK[118] = 14;
+OK[119] = 120;
+OK[120] = 60;
+OK[121] = 122;
+OK[122] = 30;
+OK[123] = 124;
+OK[124] = 62;
+OK[125] = 126;
+OK[126] = 127;
+OK[127] = 0;
+          
+run equip(13,13,1);
+run equip(30,30,0);
+run equip(43,43,0);
+run equip(40,40,0);
+run equip(46,46,1);
+run equip(6,6,0);
+run equip(47,47,1);
+run equip(38,38,1);
+run equip(31,31,1);
+run equip(14,14,0);
+run equip(23,23,0);
+run equip(49,49,0);
+run equip(41,41,1);
+run equip(8,8,1);
+run equip(45,45,0);
+run equip(36,36,1);
+run equip(3,3,0);
+run equip(9,9,1);
+run equip(35,35,0);
+run equip(24,24,1);
+    run main();
+}

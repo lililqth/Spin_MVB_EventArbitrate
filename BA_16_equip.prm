@@ -1,0 +1,295 @@
+# define judge(addr, AD)   addr < AD
+
+int numOfEquip = 16;
+int totalPriority = 4;
+chan in[numOfEquip] = [1] of {int};
+chan out[numOfEquip] = [1] of {int};
+/*-1表示出现错误，-2表示正确结束事件仲裁*/
+int Conflict[32];
+int silent[32];
+int OK[32];
+int table[32] = {36864, 57340,57341,57336,57338,57337,57339,57328,57332,57330,57334,57329,57333,57331,57335,57312,57320,57316,57324,57314,57322,57318,57326,57313,57321,57317,57325,57315,57323,57319,57327,36864};
+ /*
+F_code = 9：一般事件标志符
+F_code = 13：组事件标志符
+f_code = 4：事件
+*/
+/*
+Input:
+int addr : 设备的地址
+int equipNum : 设备的编号 （对应相应编号的管道）
+int eventPriority : 事件优先级
+*/
+proctype equip(int addr; int equipNum; int eventPriority){
+int Priority;
+Priority = 100; /* 定义当前事件巡回的优先级*/
+int i, j;
+int addrSub, ADSub;
+bool judge;
+bool haveIncident = true;
+int signalJudge;
+int receiveNum = 0;
+int signalAnswer = (4 << 12) + addr; /*事件标识符响应*/
+int messageAnswer = addr; /*事件响应*/
+
+/*等待新的请求*/
+S1: if
+    ::empty(out[equipNum])->  goto S1;
+    ::nempty(out[equipNum])-> out[equipNum] ? receiveNum; goto S2;
+    fi
+/*判断 1. 要不要响应 2. 响应事件标志符 3. 响应事件*/
+S2: signalJudge = 1;
+    int fCode = receiveNum >> 12;
+    int AD = receiveNum & 4095;
+
+    /*获取本次事件巡回的优先级*/
+    if
+    :: (fCode==9 && Priority==100) -> Priority = (receiveNum & 240) >> 4;
+    :: (fCode==9  && Priority!=100) -> Priority = 100;
+    :: else -> skip;
+    fi
+/*
+    if
+    :: eventPriority == 1 -> printf("fuck!!! %d\n",receiveNum);
+    :: else -> skip;
+    fi
+*/
+    /*找到第一个0的位置*/
+    for (i : 0..11){
+        if
+        :: (AD & (1 << (11 - i))) >> (11 - i) ==0 -> goto FZ;
+        :: else -> skip;
+        fi
+    }
+
+FZ: 
+    i++;
+    addrSub = ((addr << i) & 4095) >> i;
+    ADSub = ((AD << i) & 4095) >> i;
+    if
+    :: (addrSub == ADSub) -> judge = true;
+    :: else -> judge = false;
+    fi
+    if
+    :: (haveIncident==true && fCode == 9) -> goto S3; /*一般事件请求*/
+    :: (haveIncident==true && fCode == 13 && judge == true) -> goto S3; /*组事件请求*/
+    :: (fCode == 4 && judge == true) -> goto S4; /*响应事件*/
+    :: else -> goto S1;
+    fi
+
+
+/*发送事件标志符*/
+S3: if
+    :: Priority == eventPriority -> in[equipNum] ! signalAnswer;
+    :: else -> skip;
+    fi
+    goto S1;
+
+/*发送事件*/
+S4: haveIncident = false;
+    in[equipNum] ! messageAnswer;
+    goto S5;
+
+/*生命周期结束*/
+S5: printf("equip%d ended\n", addr); skip;
+}
+
+
+proctype main(){
+int totalSendNum = 0; /*用于记录总共发送了几条消息*/
+int commonEventTable[4] = {36864, 36880, 36896, 36912};/*不同优先级的一般事件*/
+int Priority = 0;
+int i, j;
+int T_reply = 100;
+int answerNum;
+/*事件仲裁*/
+int direction; //仲裁结果 1.碰撞 2. 寂静 3. 单一响应
+int currentIndex = 0; //当前位置
+int message = 36864;
+int temp;
+/*向每一个端口发送消息*/
+S1: 
+    if 
+    :: currentIndex==31 -> message = commonEventTable[Priority];
+    :: currentIndex==0 -> message = commonEventTable[Priority];
+    :: else ->skip;
+    fi
+    totalSendNum++;
+    temp = 0;
+    /*清空输入和输出信道*/
+    printf("message send %d, message %d", currentIndex, message);
+
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) ->  in[i] ? temp;
+        :: nempty(out[i]) -> out[i] ? temp;
+        :: (empty(in[i]) && empty(out[i]))-> skip;
+        fi
+    }
+    for (i : 0 .. numOfEquip - 1){
+        out[i] ! message;
+    }
+    goto S2;
+
+/*等待T_reply的时间*/
+S2: for (i : 1 .. T_reply){
+        skip;
+    }
+    goto S3;
+
+/*接受消息，并进行事件仲裁*/
+S3: answerNum = 0;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> 
+            answerNum++;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    if
+    ::answerNum > 1 -> ;currentIndex = Conflict[currentIndex]; message = table[currentIndex]; printf("conflict\n"); goto S1;// 冲突
+    ::(answerNum == 0) ->
+        printf("silent\n");
+        currentIndex = silent[currentIndex];
+        if
+        ::(currentIndex == -2 && Priority == totalPriority - 1) -> goto SF; /*如果已经对所有的优先级进行了遍历*/
+        ::(currentIndex == -2 && Priority < totalPriority - 1 ) -> Priority++; currentIndex = 0; printf("Priority = %d\n", Priority); /*对下一个优先级遍历*/
+        ::else -> message = table[currentIndex];
+        fi
+        goto S1;//寂静
+    ::answerNum == 1 -> currentIndex = OK[currentIndex]; message = table[currentIndex]; printf("single\n"); goto S4;//单一响应
+    ::else -> printf("error\n");
+    fi
+
+/*单一响应，接受消息*/
+S4: j = -1;
+    for(i : 0 .. numOfEquip - 1) {
+        if
+        :: nempty(in[i]) -> j=i;
+        :: empty(in[i]) -> skip;
+        fi
+    }
+    int answer;
+    in[j] ? answer;
+    out[j] ! answer;
+    for (i : 1 .. T_reply){
+        skip;
+    }
+    in[j] ? answer;
+    goto S1;
+
+SF: printf("All Ended\n"); 
+    printf("Total number %d\n", totalSendNum);
+    skip;/*生命周期结束*/
+}
+
+init{
+    Conflict[0] = 1;
+    Conflict[1] = 3;
+    Conflict[2] = 5;
+    Conflict[3] = 7;
+    Conflict[4] = 9;
+    Conflict[5] = 11;
+    Conflict[6] = 13;
+    Conflict[7] = 15;
+    Conflict[8] = 17;
+    Conflict[9] = 19;
+    Conflict[10] = 21;
+    Conflict[11] = 23;
+    Conflict[12] = 25;
+    Conflict[13] = 27;
+    Conflict[14] = 29;
+    Conflict[15] = -1;
+    Conflict[16] = -1;
+    Conflict[17] = -1;
+    Conflict[18] = -1;
+    Conflict[19] = -1;
+    Conflict[20] = -1;
+    Conflict[21] = -1;
+    Conflict[22] = -1;
+    Conflict[23] = -1;
+    Conflict[24] = -1;
+    Conflict[25] = -1;
+    Conflict[26] = -1;
+    Conflict[27] = -1;
+    Conflict[28] = -1;
+    Conflict[29] = -1;
+    Conflict[30] = -1;
+    Conflict[15] = 0;
+        
+    silent[0] = -2;
+    silent[1] = 2;
+    silent[2] = 31;
+    silent[3] = 4;
+    silent[4] = 2;
+    silent[5] = 6;
+    silent[6] = 31;
+    silent[7] = 8;
+    silent[8] = 4;
+    silent[9] = 10;
+    silent[10] = 2;
+    silent[11] = 12;
+    silent[12] = 6;
+    silent[13] = 14;
+    silent[14] = 31;
+    silent[15] = -1;
+    silent[16] = -1;
+    silent[17] = -1;
+    silent[18] = -1;
+    silent[19] = -1;
+    silent[20] = -1;
+    silent[21] = -1;
+    silent[22] = -1;
+    silent[23] = -1;
+    silent[24] = -1;
+    silent[25] = -1;
+    silent[26] = -1;
+    silent[27] = -1;
+    silent[28] = -1;
+    silent[29] = -1;
+    silent[30] = -1;
+    silent[31] = -2
+      
+    OK[0] = 31;
+    OK[1] = 2;
+    OK[2] = 31;
+    OK[3] = 4;
+    OK[4] = 2;
+    OK[5] = 6;
+    OK[6] = 31;
+    OK[7] = 8;
+    OK[8] = 4;
+    OK[9] = 10;
+    OK[10] = 2;
+    OK[11] = 12;
+    OK[12] = 6;
+    OK[13] = 14;
+    OK[14] = 31;
+    OK[15] = 16;
+    OK[16] = 8;
+    OK[17] = 18;
+    OK[18] = 4;
+    OK[19] = 20;
+    OK[20] = 10;
+    OK[21] = 22;
+    OK[22] = 2;
+    OK[23] = 24;
+    OK[24] = 12;
+    OK[25] = 26;
+    OK[26] = 6;
+    OK[27] = 28;
+    OK[28] = 14;
+    OK[29] = 30;
+    OK[30] = 31;
+    OK[31] = 0
+          
+    run main();
+    run equip(0, 0, 0);
+    run equip(1, 1, 0);
+    run equip(2, 2, 0);
+    run equip(3, 3, 0);
+    run equip(4, 4, 1);
+    run equip(5, 5, 1);
+    run equip(6, 6, 1);
+    run equip(7, 7, 1);
+}
