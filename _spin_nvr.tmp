@@ -1,0 +1,9 @@
+never p2 {    /* !([] ((currentP>=maxP))) */
+T0_init:
+	do
+	:: atomic { (! (((currentP>=maxP)))) -> assert(!(! (((currentP>=maxP))))) }
+	:: (1) -> goto T0_init
+	od;
+accept_all:
+	skip
+}

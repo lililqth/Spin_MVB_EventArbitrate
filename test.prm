@@ -1,0 +1,36 @@
+chan ch = [0] of {int};
+int arbitrateEnded = 0;
+int numOfEvent = 0;
+proctype equip(){
+   numOfEvent++; 
+    int y;
+/*取出标志符请求*/
+    ch ? y;
+/*发送标志符响应*/
+    ch ! 2;
+/*取出事件请求*/
+    ch ? y;
+/*发送事件响应*/
+    ch ! 2;
+    numOfEvent--;
+}
+
+proctype main(){
+    int x;
+/*发送标志符请求*/
+    ch ! 1;
+/*取出标志符应答*/
+    ch ? x;
+/*发送事件请求*/
+    ch ! 3;
+/*取出事件响应*/
+    ch ? x; 
+    arbitrateEnded = 1;
+}
+init{
+    arbitrateEnded = 0;
+    run equip();
+    run main();
+}
+ltl p1 {<>(((arbitrateEnded==0) || (arbitrateEnded==1 &&
+numOfEvent==0)) && _nr_pr==0)};

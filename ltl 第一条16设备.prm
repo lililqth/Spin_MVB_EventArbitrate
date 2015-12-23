@@ -1,10 +1,8 @@
 /*
 用于形式化验证的变量：
-maxP：之前事件的最大优先级。
-currentP：当前正在读取事件的优先级。
+arbitrateEnded：是否事件仲裁结束了。
+numOfEvent：当前悬挂的所有事件数量。
 */
-int maxP = 0;
-int currentP = 0;
 bool arbitrateEnded = false;
 int numOfEvent = 0;
 int totalSendNum = 0; /*用于记录总共发送了几条消息*/
@@ -31,6 +29,7 @@ int equipNum : 设备的编号 （对应相应编号的管道）
 int eventPriority : 事件优先级
 */
 proctype equip(int addr; int equipNum; int eventPriority){
+numOfEvent++;
 int ended = false;
 int Priority;
 Priority = 100; /* 定义当前事件巡回的优先级*/
@@ -109,6 +108,7 @@ S4: haveIncident = false;
 S5: /*printf("equip%d ended\n", addr);*/
     endedEquip++; 
     totalWeightSum =totalWeightSum + totalSendNum * (3 - eventPriority);
+    numOfEvent--;
     ended = true;
     skip;
 }
@@ -193,18 +193,13 @@ S4: j = -1;
         skip;
     }
     in[j] ? answer;
-   
-    currentP = Priority; 
-    if
-    :: (maxP < Priority) -> maxP = Priority;
-    :: else -> skip;
-    fi
     goto S1;
 
 SF: printf("All Ended\n");
     printf("Total send sum%d\n", totalSendNum);
     printf("endedEquip number %d\n",endedEquip);
     printf("total weight sum %d\n",totalWeightSum);
+    arbitrateEnded = true;
     skip;/*生命周期结束*/
 }
 
@@ -308,11 +303,13 @@ init{
     OK[30] = 31;
     OK[31] = 0
 
-    maxP = 0;
-    currentP = 0;
+    numOfEvent = 0;
+    arbitrateEnded = false;
+
     run equip(7,7,0);
     run main();
 
     assert(!(arbitrateEnded==true && numOfEvent != 0));
 }
-ltl p2 {[] (currentP >= maxP)}
+ltl p1 {<>(((arbitrateEnded==0) || (arbitrateEnded==1 &&
+numOfEvent==0)) && _nr_pr==0)};
